@@ -778,6 +778,7 @@ chmod +x "${CODEX_INSTALL_DIR}/start.sh"
 
     #[test]
     fn build_command_path_includes_cargo_bin_from_home() -> Result<()> {
+        let _env_guard = crate::test_util::env_lock();
         let temp = tempdir()?;
         let home_dir = temp.path().join("home");
         let cargo_bin = home_dir.join(".cargo/bin");

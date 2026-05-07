@@ -48,24 +48,6 @@ rpm_version_parts() {
     RPM_RELEASE="$hash"
 }
 
-ensure_updater_binary() {
-    local cargo_cmd=""
-
-    if [ -x "$UPDATER_BINARY_SOURCE" ]; then
-        return
-    fi
-
-    [ -f "$REPO_DIR/Cargo.toml" ] || error "Missing updater binary: $UPDATER_BINARY_SOURCE"
-    cargo_cmd="$(find_cargo_command)" || error "cargo is required to build codex-update-manager.
-Install the Rust toolchain:
-  bash scripts/install-deps.sh        # auto-installs via rustup
-  # or manually: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
-
-    info "Building codex-update-manager release binary"
-    "$cargo_cmd" build --release -p codex-update-manager >&2
-    [ -x "$UPDATER_BINARY_SOURCE" ] || error "Failed to build updater binary: $UPDATER_BINARY_SOURCE"
-}
-
 main() {
     [ -d "$APP_DIR" ] || error "Missing app directory: $APP_DIR. Run ./install.sh first."
     [ -x "$APP_DIR/start.sh" ] || error "Missing launcher: $APP_DIR/start.sh"
