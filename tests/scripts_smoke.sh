@@ -496,6 +496,10 @@ if "using_second_instance_handoff" not in source or "needs_cold_start" not in so
     raise SystemExit("launcher must have an explicit second-instance handoff mode")
 if "second_instance_handoff_ready" not in runtime_body:
     raise SystemExit("second-instance handoff must skip cold-start setup")
+if "clear_bundled_marketplace_tmp_cache\nmonitor_bundled_marketplace_tmp_permissions\nreconcile_runtime_state" in runtime_body:
+    raise SystemExit("warm-start path must not clear bundled marketplace temp cache")
+if not re.search(r'if needs_cold_start; then\s+clear_bundled_marketplace_tmp_cache\s+# The runtime marketplace is populated asynchronously.*?monitor_bundled_marketplace_tmp_permissions\s+sync_browser_use_bundled_plugin_cache', runtime_body, re.S):
+    raise SystemExit("bundled marketplace cleanup must run only on cold start immediately before plugin sync")
 if 'if needs_cold_start && [ -z "${CODEX_CLI_PATH:-}" ]; then' not in runtime_body:
     raise SystemExit("second-instance handoff must skip CLI lookup")
 if 'if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then' not in runtime_body:

@@ -1665,8 +1665,6 @@ configure_side_by_side_app_env
 load_packaged_runtime_helper
 prepend_managed_node_runtime_to_path
 register_url_scheme_handlers
-clear_bundled_marketplace_tmp_cache
-monitor_bundled_marketplace_tmp_permissions
 reconcile_runtime_state
 detect_warm_start
 trap cleanup_launcher EXIT
@@ -1730,6 +1728,10 @@ fi
 
 export_packaged_runtime_env
 if needs_cold_start; then
+    clear_bundled_marketplace_tmp_cache
+    # The runtime marketplace is populated asynchronously and can briefly
+    # recreate read-only plugin cache trees before the sync below replaces them.
+    monitor_bundled_marketplace_tmp_permissions
     sync_browser_use_bundled_plugin_cache
     sync_chrome_bundled_plugin_cache
     sync_computer_use_bundled_plugin_cache
