@@ -125,14 +125,14 @@ render_desktop_entry() {
             /^\[/ { skip = 0 }
             skip { next }
             /^Actions=/ {
-                print "Actions=NewInstance;"
+                print "Actions=new-window;"
                 actions_rewritten = 1
                 next
             }
             { print }
             END {
                 if (actions_rewritten == 0) {
-                    print "Actions=NewInstance;"
+                    print "Actions=new-window;"
                 }
             }
         ' "$rendered_target" > "$target"
@@ -251,6 +251,13 @@ SCRIPT
     chmod 0644 "$target"
 }
 
+render_desktop_entry_doctor_helper() {
+    local target="$1"
+
+    cp "$REPO_DIR/packaging/linux/codex-desktop-entry-doctor.sh" "$target"
+    chmod 0644 "$target"
+}
+
 write_no_updater_deb_postinst() {
     local target="$1"
     local package_name
@@ -265,10 +272,16 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 CLEANUP_HELPER="/opt/$package_name/.codex-linux/codex-no-updater-transition-cleanup.sh"
+DESKTOP_ENTRY_DOCTOR="/opt/$package_name/.codex-linux/codex-desktop-entry-doctor.sh"
 if [ -f "\$CLEANUP_HELPER" ]; then
     # shellcheck source=/opt/$package_name/.codex-linux/codex-no-updater-transition-cleanup.sh
     . "\$CLEANUP_HELPER"
     codex_no_updater_cleanup_update_manager_service || true
+fi
+if [ -f "\$DESKTOP_ENTRY_DOCTOR" ]; then
+    # shellcheck source=/opt/$package_name/.codex-linux/codex-desktop-entry-doctor.sh
+    . "\$DESKTOP_ENTRY_DOCTOR"
+    codex_desktop_repair_system_package_shadow_entries $package_name || true
 fi
 
 exit 0
@@ -304,6 +317,7 @@ write_no_updater_pacman_install_hooks() {
     package_name="$(sed_escape_replacement "$PACKAGE_NAME")"
     cat > "$target" <<SCRIPT
 CLEANUP_HELPER="/opt/$package_name/.codex-linux/codex-no-updater-transition-cleanup.sh"
+DESKTOP_ENTRY_DOCTOR="/opt/$package_name/.codex-linux/codex-desktop-entry-doctor.sh"
 
 codex_no_updater_cleanup_if_present() {
     if [ -f "\$CLEANUP_HELPER" ]; then
@@ -313,10 +327,19 @@ codex_no_updater_cleanup_if_present() {
     fi
 }
 
+codex_desktop_repair_if_present() {
+    if [ -f "\$DESKTOP_ENTRY_DOCTOR" ]; then
+        # shellcheck source=/opt/$package_name/.codex-linux/codex-desktop-entry-doctor.sh
+        . "\$DESKTOP_ENTRY_DOCTOR"
+        codex_desktop_repair_system_package_shadow_entries $package_name || true
+    fi
+}
+
 post_install() {
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
     fi
+    codex_desktop_repair_if_present
     codex_no_updater_cleanup_if_present
 }
 
@@ -412,6 +435,7 @@ stage_common_package_files() {
     cp -aT "$APP_DIR" "$app_root"
     mkdir -p "$app_root/.codex-linux"
     cp "$ICON_SOURCE" "$app_root/.codex-linux/$PACKAGE_NAME.png"
+    render_desktop_entry_doctor_helper "$app_root/.codex-linux/codex-desktop-entry-doctor.sh"
     render_desktop_entry "$root/usr/share/applications/$PACKAGE_NAME.desktop"
     cp "$ICON_SOURCE" "$root/usr/share/icons/hicolor/256x256/apps/$PACKAGE_NAME.png"
     if package_with_updater_enabled; then
@@ -480,6 +504,8 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/packaging/linux/control" "$update_builder_root/packaging/linux/control"
     cp "$REPO_DIR/packaging/linux/codex-desktop.spec" "$update_builder_root/packaging/linux/codex-desktop.spec"
     cp "$REPO_DIR/packaging/linux/codex-desktop.desktop" "$update_builder_root/packaging/linux/codex-desktop.desktop"
+    cp "$REPO_DIR/packaging/linux/codex-desktop-entry-doctor.sh" \
+        "$update_builder_root/packaging/linux/codex-desktop-entry-doctor.sh"
     cp "$REPO_DIR/packaging/linux/codex-packaged-runtime.sh" "$update_builder_root/packaging/linux/codex-packaged-runtime.sh"
     cp "$REPO_DIR/packaging/linux/com.github.ilysenko.codex-desktop-linux.update.policy" \
         "$update_builder_root/packaging/linux/com.github.ilysenko.codex-desktop-linux.update.policy"
