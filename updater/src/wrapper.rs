@@ -393,6 +393,7 @@ pub fn detect_wrapper_update(
     detect_wrapper_update_for_installed(repo, &installed, remote, branch)
 }
 
+#[cfg(test)]
 pub fn detect_wrapper_update_for_installed(
     repo: &Path,
     installed: &WrapperVersion,
@@ -465,6 +466,7 @@ pub fn detect_wrapper_update_state_for_installed(
 }
 
 /// Convenience for callers that hold a `builder_bundle_root` path.
+#[cfg(test)]
 pub fn detect_from_bundle_root(
     bundle_root: &Path,
     installed: &WrapperVersion,
