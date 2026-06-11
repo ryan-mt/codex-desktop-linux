@@ -37,6 +37,12 @@ function readComputerUseUiSettingsFlag(env) {
 }
 
 function computerUseUiSettingsPath(env) {
+  // Mirror the runtime codexLinuxSettingsPath() resolution so this build-time
+  // reader finds the same settings.json the patched app writes the flag to.
+  const override = env.CODEX_LINUX_SETTINGS_FILE;
+  if (typeof override === "string" && override.length > 0) {
+    return override;
+  }
   const xdgConfig = env.XDG_CONFIG_HOME;
   const home = env.HOME;
   const configHome = (xdgConfig && xdgConfig.length > 0)
@@ -52,7 +58,7 @@ function computerUseUiSettingsPath(env) {
 }
 
 function computerUseUiSettingsAppId(env) {
-  const appId = env.CODEX_APP_ID || env.CODEX_LINUX_APP_ID || "codex-desktop";
+  const appId = env.CODEX_LINUX_APP_ID || env.CODEX_APP_ID || "codex-desktop";
   return /^[A-Za-z0-9._-]+$/.test(appId) ? appId : "codex-desktop";
 }
 

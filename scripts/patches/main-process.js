@@ -599,12 +599,17 @@ function applyLinuxQuitGuardPatch(currentSource) {
   }
 
   if (patchedSource.includes("require(`electron`)")) {
-    return `${quitGuardSuffix}${patchedSource}`;
+    // Insert after a leading "use strict" so prepending the helper does not
+    // demote the directive to a plain expression and de-strict the bundle.
+    const insertAt = patchedSource.startsWith('"use strict";')
+      ? '"use strict";'.length
+      : patchedSource.startsWith("'use strict';")
+        ? "'use strict';".length
+        : 0;
+    return `${patchedSource.slice(0, insertAt)}${quitGuardSuffix}${patchedSource.slice(insertAt)}`;
   }
 
-  if (patchedSource.includes("require(`electron`)") && patchedSource.includes("require(`node:path`)")) {
-    console.warn("WARN: Could not find Linux quit guard insertion point — skipping explicit quit-state patch");
-  }
+  console.warn("WARN: Could not find Linux quit guard insertion point — skipping explicit quit-state patch");
 
   return patchedSource;
 }

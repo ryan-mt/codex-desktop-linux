@@ -1144,6 +1144,25 @@ test("adds the Linux quit guard when only the Electron require is recognizable",
   assert.equal((patched.match(/codexLinuxQuitInProgress=!1/g) ?? []).length, 1);
 });
 
+test("keeps a leading use strict directive ahead of the quit guard fallback", () => {
+  const source =
+    '"use strict";const e=require(`./app-session.js`);let t=require(`electron`);class WindowManager{}';
+
+  const patched = applyPatchTwice(applyLinuxQuitGuardPatch, source);
+
+  assert.match(patched, /^"use strict";let codexLinuxQuitInProgress=!1/);
+  assert.equal((patched.match(/codexLinuxQuitInProgress=!1/g) ?? []).length, 1);
+});
+
+test("warns and skips the quit guard when no Electron require exists", () => {
+  const source = "const e=1;";
+
+  const { value, warnings } = captureWarns(() => applyLinuxQuitGuardPatch(source));
+
+  assert.equal(value, source);
+  assert.match(warnings.join("\n"), /quit guard insertion point/);
+});
+
 test("upgrades the legacy Linux quit guard helper when re-patching older bundles", () => {
   const source =
     "let n=require(`electron`),i=require(`node:path`),o=require(`node:fs`);let codexLinuxQuitInProgress=!1,codexLinuxMarkQuitInProgress=()=>{codexLinuxQuitInProgress=!0},codexLinuxIsQuitInProgress=()=>codexLinuxQuitInProgress===!0;var x=1;";
@@ -4046,11 +4065,13 @@ function withIsolatedHome(body) {
   const previousXdg = process.env.XDG_CONFIG_HOME;
   const previousAppId = process.env.CODEX_APP_ID;
   const previousLinuxAppId = process.env.CODEX_LINUX_APP_ID;
+  const previousSettingsFile = process.env.CODEX_LINUX_SETTINGS_FILE;
   const previousFlag = process.env[COMPUTER_USE_UI_ENV_VAR];
   process.env.HOME = tempHome;
   delete process.env.XDG_CONFIG_HOME;
   delete process.env.CODEX_APP_ID;
   delete process.env.CODEX_LINUX_APP_ID;
+  delete process.env.CODEX_LINUX_SETTINGS_FILE;
   delete process.env[COMPUTER_USE_UI_ENV_VAR];
   try {
     return body(tempHome);
@@ -4116,6 +4137,24 @@ test("isComputerUseUiEnabled honours side-by-side CODEX_APP_ID settings", () => 
   withIsolatedHome((home) => {
     process.env.CODEX_APP_ID = "codex-cua-lab";
     writeSettingsFile(home, JSON.stringify({ [COMPUTER_USE_UI_SETTINGS_KEY]: true }), "codex-cua-lab");
+    assert.equal(isComputerUseUiEnabled(), true);
+  });
+});
+
+test("isComputerUseUiEnabled prefers CODEX_LINUX_APP_ID like the runtime settings writer", () => {
+  withIsolatedHome((home) => {
+    process.env.CODEX_LINUX_APP_ID = "codex-cua-lab";
+    process.env.CODEX_APP_ID = "codex-desktop";
+    writeSettingsFile(home, JSON.stringify({ [COMPUTER_USE_UI_SETTINGS_KEY]: true }), "codex-cua-lab");
+    assert.equal(isComputerUseUiEnabled(), true);
+  });
+});
+
+test("isComputerUseUiEnabled honours CODEX_LINUX_SETTINGS_FILE", () => {
+  withIsolatedHome((home) => {
+    const settingsFile = path.join(home, "custom-settings.json");
+    fs.writeFileSync(settingsFile, JSON.stringify({ [COMPUTER_USE_UI_SETTINGS_KEY]: true }), "utf8");
+    process.env.CODEX_LINUX_SETTINGS_FILE = settingsFile;
     assert.equal(isComputerUseUiEnabled(), true);
   });
 });
