@@ -318,8 +318,7 @@ async fn run_daemon(
         error!(?error, "initial reconciliation failed");
     }
 
-    let mut check_interval =
-        time::interval(Duration::from_secs(config.check_interval_hours * 3600));
+    let mut check_interval = time::interval(check_interval_period(config.check_interval_hours));
     let mut reconcile_interval = time::interval(Duration::from_secs(RECONCILE_INTERVAL_SECONDS));
     check_interval.tick().await;
     reconcile_interval.tick().await;
@@ -835,7 +834,7 @@ async fn run_check_cycle(
             .rollback_blocked_candidate_version
             .as_deref()
             .is_some_and(|blocked| {
-                installed_version_matches_candidate(blocked, &downloaded.candidate_version)
+                candidate_matches_rolled_back_version(blocked, &downloaded.candidate_version)
             })
         {
             state.status = UpdateStatus::Idle;
@@ -1216,6 +1215,33 @@ fn installed_version_matches_candidate(installed: &str, candidate: &str) -> bool
         Some(std::cmp::Ordering::Equal) => true,
         Some(_) => false,
         None => installed == candidate,
+    }
+}
+
+/// `tokio::time::interval` panics on a zero period; clamp a hand-edited
+/// `check_interval_hours = 0` to the smallest supported cadence.
+fn check_interval_period(check_interval_hours: u64) -> Duration {
+    Duration::from_secs(check_interval_hours.max(1).saturating_mul(3600))
+}
+
+fn version_dmg_short_hash(version: &str) -> Option<&str> {
+    version
+        .split_once('+')
+        .map(|(_, short_hash)| short_hash)
+        .filter(|short_hash| !short_hash.is_empty())
+}
+
+/// Returns true when a downloaded candidate is the same upstream DMG as a
+/// previously rolled-back install. Generated versions embed the download
+/// timestamp, so the `+<dmg-sha8>` suffix is the only identity that survives
+/// a re-download of the same DMG.
+fn candidate_matches_rolled_back_version(blocked: &str, candidate: &str) -> bool {
+    match (
+        version_dmg_short_hash(blocked),
+        version_dmg_short_hash(candidate),
+    ) {
+        (Some(blocked_hash), Some(candidate_hash)) => blocked_hash == candidate_hash,
+        _ => installed_version_matches_candidate(blocked, candidate),
     }
 }
 
@@ -1654,6 +1680,35 @@ mod tests {
             wrapper_remote: String::new(),
             wrapper_branch: "main".to_string(),
         }
+    }
+
+    #[test]
+    fn rollback_block_matches_same_dmg_across_redownload_timestamps() {
+        // The timestamp segments differ between the original download and a
+        // later re-download of the same DMG; only the +sha8 suffix is stable.
+        assert!(candidate_matches_rolled_back_version(
+            "2026.05.04.131500+abcdef12",
+            "2026.06.10.083355+abcdef12"
+        ));
+        assert!(!candidate_matches_rolled_back_version(
+            "2026.05.04.131500+abcdef12",
+            "2026.06.10.083355+12345678"
+        ));
+        // Versions without a DMG hash fall back to version comparison.
+        assert!(candidate_matches_rolled_back_version(
+            "2026.05.04.131500",
+            "2026.05.04.131500"
+        ));
+        assert!(!candidate_matches_rolled_back_version(
+            "2026.05.04.131500",
+            "2026.06.10.083355"
+        ));
+    }
+
+    #[test]
+    fn check_interval_period_clamps_zero_hours() {
+        assert_eq!(check_interval_period(0), Duration::from_secs(3600));
+        assert_eq!(check_interval_period(6), Duration::from_secs(6 * 3600));
     }
 
     #[test]

@@ -80,39 +80,60 @@ pub async fn download_dmg(
         .await
         .with_context(|| format!("Failed to create {}", destination_dir.display()))?;
 
+    // Stream into a sidecar file and rename on success so a failed
+    // re-download cannot truncate the previously cached DMG that pending
+    // installs and wrapper rebuilds still reference through state.
     let destination = destination_dir.join("Codex.dmg");
-    let mut file = File::create(&destination)
-        .await
-        .with_context(|| format!("Failed to create {}", destination.display()))?;
+    let partial = destination_dir.join("Codex.dmg.part");
 
-    let response = client
-        .get(dmg_url)
-        .send()
-        .await
-        .with_context(|| format!("Failed GET request for {dmg_url}"))?
-        .error_for_status()
-        .with_context(|| format!("GET request for {dmg_url} returned an error status"))?;
-
-    let mut hasher = Sha256::new();
-    let mut stream = response.bytes_stream();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.with_context(|| format!("Failed downloading {dmg_url}"))?;
-        file.write_all(&chunk)
+    let download_result: Result<String> = async {
+        let mut file = File::create(&partial)
             .await
-            .with_context(|| format!("Failed writing {}", destination.display()))?;
-        hasher.update(&chunk);
+            .with_context(|| format!("Failed to create {}", partial.display()))?;
+
+        let response = client
+            .get(dmg_url)
+            .send()
+            .await
+            .with_context(|| format!("Failed GET request for {dmg_url}"))?
+            .error_for_status()
+            .with_context(|| format!("GET request for {dmg_url} returned an error status"))?;
+
+        let mut hasher = Sha256::new();
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.with_context(|| format!("Failed downloading {dmg_url}"))?;
+            file.write_all(&chunk)
+                .await
+                .with_context(|| format!("Failed writing {}", partial.display()))?;
+            hasher.update(&chunk);
+        }
+
+        file.flush()
+            .await
+            .with_context(|| format!("Failed flushing {}", partial.display()))?;
+
+        Ok(hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>())
     }
+    .await;
 
-    file.flush()
+    let sha256 = match download_result {
+        Ok(sha256) => sha256,
+        Err(error) => {
+            let _ = tokio::fs::remove_file(&partial).await;
+            return Err(error);
+        }
+    };
+
+    tokio::fs::rename(&partial, &destination)
         .await
-        .with_context(|| format!("Failed flushing {}", destination.display()))?;
+        .with_context(|| format!("Failed to move {} into place", partial.display()))?;
 
-    let sha256 = hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
     let candidate_version = derive_candidate_version(&sha256, version_timestamp)?;
 
     Ok(DownloadedDmg {
@@ -198,6 +219,37 @@ mod tests {
             "678cd508ffe0071e217020a7a4eecbebe25362c022ac78c13a5ae87b7a3a0c92"
         );
         assert_eq!(downloaded.candidate_version, "2026.03.24.120000+678cd508");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failed_download_preserves_existing_cached_dmg() -> Result<()> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Codex.dmg"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let client = Client::builder().build()?;
+        let temp = tempdir()?;
+        let cached = temp.path().join("Codex.dmg");
+        tokio::fs::write(&cached, b"previously-cached-dmg").await?;
+
+        let result = download_dmg(
+            &client,
+            &format!("{}/Codex.dmg", server.uri()),
+            temp.path(),
+            Utc.with_ymd_and_hms(2026, 3, 24, 12, 0, 0).unwrap(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(
+            tokio::fs::read(&cached).await?,
+            b"previously-cached-dmg".to_vec()
+        );
+        assert!(!temp.path().join("Codex.dmg.part").exists());
         Ok(())
     }
 
